@@ -90,16 +90,17 @@ func main() {
 	interfaceName := os.Getenv("interface")
 	reason := os.Getenv("reason")
 
-	log.WithFields(log.Fields{
+	le := log.WithFields(log.Fields{
 		"interface": interfaceName,
 		"reason":    reason,
-	}).Info("starting")
+	})
+
+	le.Info("starting")
 
 	link, err := netlink.LinkByName(interfaceName)
 	if err != nil {
-		log.WithFields(log.Fields{
-			"error":     err,
-			"interface": interfaceName,
+		le.WithFields(log.Fields{
+			"error": err,
 		}).Panic("netlink.LinkByName failed")
 	}
 
@@ -107,12 +108,19 @@ func main() {
 	case "PREINIT":
 		err := netlink.LinkSetUp(link)
 		if err != nil {
-			log.WithFields(log.Fields{
-				"error":     err,
-				"interface": interfaceName,
+			le.WithFields(log.Fields{
+				"error": err,
 			}).Panic("netlink.LinkSetUp failed")
 		}
-		flush(link, nl.FAMILY_ALL)
+		flush(link, nl.FAMILY_V4)
+	case "PREINIT6":
+		err := netlink.LinkSetUp(link)
+		if err != nil {
+			le.WithFields(log.Fields{
+				"error": err,
+			}).Panic("netlink.LinkSetUp failed")
+		}
+		flush(link, nl.FAMILY_V6)
 	case "BOUND":
 		fallthrough
 	case "RENEW":
@@ -120,6 +128,19 @@ func main() {
 	case "REBIND":
 		fallthrough
 	case "REBOOT":
+		/*
+			if os.Getenv("old_ip_address") != "" {
+				if os.Getenv("old_ip_address") != os.Getenv("new_ip_address") {
+					flush(link, nl.FAMILY_V4)
+				} else {
+					le.Debug("IP address not changed")
+				}
+			} else {
+				if reason == "BOUND" || reason == "REBOOT" {
+					update_ip_address(link)
+				}
+			}
+		*/
 		if os.Getenv("old_ip_address") != "" && os.Getenv("old_ip_address") != os.Getenv("new_ip_address") {
 			flush(link, nl.FAMILY_V4)
 		}
@@ -128,7 +149,15 @@ func main() {
 			reason == "BOUND" ||
 			reason == "REBOOT" {
 			update_ip_address(link)
+		}
 
+	case "BOUND6":
+		fallthrough
+	case "RENEW6":
+		fallthrough
+	case "REBIND6":
+		if os.Getenv("new_ip6_address") != "" {
+			update_ip6_address(link)
 		}
 	case "EXPIRE":
 		fallthrough
@@ -142,7 +171,7 @@ func main() {
 		update_ip_address(link)
 		set_mtu(link)
 	default:
-		log.WithFields(log.Fields{
+		le.WithFields(log.Fields{
 			"reason": reason,
 		}).Error("reason unhandled")
 	}
@@ -203,6 +232,31 @@ func update_ip_address(link netlink.Link) {
 		"interface":       interfaceName,
 		"new-ip-address":  os.Getenv("new_ip_address"),
 		"new-subnet-mask": os.Getenv("new_subnet_mask"),
+	}).Debug("updated interface IP")
+}
+
+func update_ip6_address(link netlink.Link) {
+	interfaceName := linkName(link)
+	newAddr, err := netlink.ParseAddr(fmt.Sprintf("%s", os.Getenv("new_ip6_address")))
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error":          err,
+			"interface":      interfaceName,
+			"new-ip-address": os.Getenv("new_ip6_address"),
+		}).Panic("netlink.ParseAddr failed")
+	}
+
+	err = netlink.AddrAdd(link, newAddr)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error":          err,
+			"interface":      interfaceName,
+			"new-ip-address": os.Getenv("new_ip6_address"),
+		}).Panic("netlink.AddrAdd failed")
+	}
+	log.WithFields(log.Fields{
+		"interface":      interfaceName,
+		"new-ip-address": os.Getenv("new_ip6_address"),
 	}).Debug("updated interface IP")
 }
 
